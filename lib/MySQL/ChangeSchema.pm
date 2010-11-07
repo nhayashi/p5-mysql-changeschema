@@ -69,7 +69,7 @@ sub new {
     $self->db( $args{db}       or croak "should args db name" );
     $self->table( $args{table} or croak "should args table name" );
     $self->user( $args{user}   or croak "should args user name" );
-    $self->pass( $args{pass}   || "" );
+    $self->pass( $args{pass} || "" );
     map { $self->$_( $tables{$_} . $self->table ) } keys %tables;
     map { $self->$_( $triggers{$_} . $self->table ) } keys %triggers;
     $self;
@@ -229,7 +229,7 @@ sub execute {
     unlink $self->outfile_include;
     $self->replay_changes(1);
     $self->drop_temporary_table_include;
-    $self->checksum;    # TODO: not implement
+    $self->checksum if (0); # TODO: don't support checksum option
     $self->alter_rename_table( $self->table,     $self->rename_table );
     $self->alter_rename_table( $self->new_table, $self->table );
     $self->dbh->commit;
@@ -865,7 +865,14 @@ sub replay_changes {
 }
 
 sub checksum {
-    my $self = shift;
+    my $self        = shift;
+    my $query       = "checksum table %s, %s";
+    my @bind_values = ( $self->new_table, $self->table );
+    my $checksums =
+      $self->dbh->selectall_arrayref( sprintf( $query, @bind_values ),
+        { Slice => {} } );
+    $checksums->[0]->{Checksum} == $checksums->[1]->{Checksum}
+      or croak "checksums don't match";
 }
 
 package MySQL::ChangeSchema::Index;
