@@ -8,4 +8,6 @@
 * modify to DRY code
 * output debug message
 * support force option
+* change each args for function from array to hash
+* output error message more detail
 

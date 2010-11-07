@@ -66,9 +66,9 @@ sub new {
     my $class = shift;
     my %args  = @_;
     my $self  = bless {}, $class;
-    $self->db( $args{db}       || croak "should args db name" );
-    $self->table( $args{table} || croak "should args table name" );
-    $self->user( $args{user}   || croak "should args user name" );
+    $self->db( $args{db}       or croak "should args db name" );
+    $self->table( $args{table} or croak "should args table name" );
+    $self->user( $args{user}   or croak "should args user name" );
     $self->pass( $args{pass}   || "" );
     map { $self->$_( $tables{$_} . $self->table ) } keys %tables;
     map { $self->$_( $triggers{$_} . $self->table ) } keys %triggers;
@@ -268,28 +268,28 @@ sub alter_rename_table {
 
 sub drop_table {
     my $self  = shift;
-    my $table = shift || croak "should args table name";
+    my $table = shift or croak "should args table name";
     my $query = "drop table if exists %s";
     $self->dbh->do( sprintf $query, $table );
 }
 
 sub drop_trigger {
     my $self    = shift;
-    my $trigger = shift || croak "should args trigger name";
+    my $trigger = shift or croak "should args trigger name";
     my $query   = "drop trigger if exists %s";
     $self->dbh->do( sprintf $query, $trigger );
 }
 
 sub exists_table {
     my $self  = shift;
-    my $table = shift || croak "should args table name";
+    my $table = shift or croak "should args table name";
     my $query = "show tables like '%s'";
     $self->dbh->do( sprintf $query, $table );
 }
 
 sub exists_trigger {
     my $self    = shift;
-    my $trigger = shift || croak "should args trigger name";
+    my $trigger = shift or croak "should args trigger name";
     my $query   = <<"SQL";
     select count(*) from information_schema.triggers T
      where T.trigger_schema like %s and T.trigger_name like %s
