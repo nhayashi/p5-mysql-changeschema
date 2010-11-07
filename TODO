@@ -1,0 +1,11 @@
+[TODO]
+* write test code
+* must call function more lesser
+* supply run script
+* implement validate_post_alter_PK, checksum
+* validate execute user and MySQL privilege
+* validate support MySQL version
+* modify to DRY code
+* output debug message
+* support force option
+

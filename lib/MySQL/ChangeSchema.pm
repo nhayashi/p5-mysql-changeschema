@@ -52,12 +52,6 @@ my %logfiles = (
     error_file => ".err",
 );
 
-#my @columns = qw/ columns new_columns old_columns /;
-#push @columns, qw/ columns_arrayref /;
-#my @pk_columns = qw/ pk_columns no_pk_columns new_pk_columns old_pk_columns /;
-#push @pk_columns, qw/ pk_columns_arrayref no_pk_columns_arrayref /;
-#my @range_vars = qw/ range_start range_end /;
-
 use base qw/ Class::Accessor::Fast /;
 
 __PACKAGE__->mk_accessors(
@@ -67,10 +61,6 @@ __PACKAGE__->mk_accessors(
     keys %outfiles,
     keys %logfiles,
 );
-
-#    @columns,
-#    @pk_columns,
-#    @range_vars,
 
 sub new {
     my $class = shift;
