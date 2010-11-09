@@ -8,7 +8,7 @@ use MySQL::ChangeSchema;
 my $db    = "test";
 my $table = "test2";
 my $user  = "root";
-my $pass  = "mainuser";
+my $pass  = "root";
 my $ddl   = "ALTER TABLE $table ADD fuga int";
 
 my $osc = MySQL::ChangeSchema->new(
