@@ -24,7 +24,7 @@ our $LOCK_MAX_ATTEMPTS = 3;
 our $OUTFILE_DIR = undef;
 our $LOG_DIR     = "/var/tmp/";
 
-our $OUTFILE_SIZE = 500000;
+our $OUTFILE_SIZE = 100000;
 our $COMMIT_SIZE  = 500;
 our $LONG_TX_TIME = 30;
 
@@ -205,7 +205,6 @@ sub execute {
     # load outfile table
     $self->load_outfile_table;
 
-    print "replay_changes 0\n";
     $self->replay_changes( temp_table => $TEMP_TABLE_IDS_TO_EXCLUDE );
 
     # replay changes
@@ -213,7 +212,6 @@ sub execute {
     $self->create_temporary_table_include;
     $self->load_data_include;
     unlink $self->outfile_include;
-    print "replay_changes 1\n";
     $self->replay_changes( temp_table => $TEMP_TABLE_IDS_TO_INCLUDE );
     $self->append_to_excluded_ids;
     $self->drop_temporary_table_include;
@@ -226,7 +224,6 @@ sub execute {
     $self->create_temporary_table_include;
     $self->load_data_include;
     unlink $self->outfile_include;
-    print "replay_changes 2\n";
     $self->replay_changes( temp_table => $TEMP_TABLE_IDS_TO_INCLUDE );
     $self->append_to_excluded_ids;
     $self->drop_temporary_table_include;
@@ -239,7 +236,6 @@ sub execute {
     $self->create_temporary_table_include;
     $self->load_data_include;
     unlink $self->outfile_include;
-    print "replay_changes 3\n";
     $self->replay_changes(
         temp_table => $TEMP_TABLE_IDS_TO_INCLUDE,
         use_tx     => 1
@@ -733,9 +729,7 @@ SQL
             $self->{pk_columns},  $OUTFILE_SIZE,
             $self->outfile_table, $outfile_suffix
         );
-        my $sql = sprintf $query, @bind_values;
-        print $sql."\n";
-        $row_count = $self->dbh->do( $sql );
+        $row_count = $self->dbh->do( sprintf $query, @bind_values );
 
         $self->{outfile_suffix_start} = 1;
         $self->{outfile_suffix_end}   = $outfile_suffix;
@@ -760,7 +754,7 @@ SQL
                 $equality and $equality .= " and ";
                 push @cond, sprintf( "(%s)", $equality . $range );
             }
-            $whereclause = sprintf( "(%s)", join( " or ", @cond ) );
+            $whereclause = sprintf( "where (%s)", join( " or ", @cond ) );
         }
     } while ( $row_count >= $OUTFILE_SIZE );
     $self->dbh->commit;
