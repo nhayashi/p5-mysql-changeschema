@@ -6,10 +6,10 @@ use warnings;
 use MySQL::ChangeSchema;
 
 my $db    = "test";
-my $table = "test1";
+my $table = "test2";
 my $user  = "root";
 my $pass  = "mainuser";
-my $ddl   = "ALTER TABLE $table ADD blah int";
+my $ddl   = "ALTER TABLE $table ADD fuga int";
 
 my $osc = MySQL::ChangeSchema->new(
     db    => $db,
@@ -23,6 +23,7 @@ $osc->cleanup();
 eval { $osc->execute($ddl); };
 
 if ($@) {
+    print $@."\n";
     $osc->cleanup;
 }
 

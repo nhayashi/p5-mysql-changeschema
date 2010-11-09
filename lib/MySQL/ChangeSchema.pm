@@ -90,12 +90,12 @@ sub DESTROY {
 sub init {
     my $self = shift;
 
-    $OUTFILE_DIR =
-      ( $self->dbh->selectrow_array('select @@secure_file_priv') )[0]
-      unless ($OUTFILE_DIR);
-    $OUTFILE_DIR =
-      ( $self->dbh->selectrow_array('select @@datadir') )[0] . $self->db . '/'
-      unless ($OUTFILE_DIR);
+    $OUTFILE_DIR
+      or $OUTFILE_DIR =
+      ( $self->dbh->selectrow_array('select @@secure_file_priv') )[0];
+    $OUTFILE_DIR
+      or $OUTFILE_DIR =
+      ( $self->dbh->selectrow_array('select @@datadir') )[0] . $self->db . '/';
     map { $self->$_( $OUTFILE_DIR . $outfiles{$_} . $self->table ) }
       keys %outfiles;
 
@@ -106,6 +106,7 @@ sub init {
 
 sub cleanup {
     my $self = shift;
+    $self->dbh->do("SET sql_log_bin = 0");
     map { $self->_cleanup( $_->{db}, $_->{obj} ) } @{ $self->get_clean_tables };
 
     unlink $self->outfile_exclude, $self->outfile_include;
@@ -118,15 +119,14 @@ sub _cleanup {
     my $self  = shift;
     my $db    = shift;
     my $table = shift;
-    $self->dbh->do("SET sql_log_bin = 0");
-    my $osc = MySQL::ChangeSchema->new(
+    my $osc   = MySQL::ChangeSchema->new(
         db    => $db,
         table => $table,
         user  => $self->user,
         pass  => $self->pass,
     );
-    $osc->connect();
-    $osc->get_lock();
+    $osc->connect;
+    $osc->get_lock;
     $osc->dbh->do("unlock tables");
     $osc->dbh->do("rollback");
     $osc->dbh->do("set session autocommit=1");
@@ -145,8 +145,8 @@ sub _cleanup {
 
     $osc->dbh->do("start slave")
       if ( $self->get_slave_status && !$self->{is_slave_running} );
-    $osc->release_lock();
-    $osc->dbh->disconnect();
+    $osc->release_lock;
+    $osc->dbh->disconnect;
 }
 
 sub execute {
@@ -164,6 +164,7 @@ sub execute {
     $self->parse_pk_column;
     $self->decide_reindex;
 
+    $self->dbh->do("SET sql_log_bin = 0");
     $self->create_copy_table;
     $self->alter_copy_table;
     $self->parse_new_index;
@@ -190,48 +191,63 @@ sub execute {
 
     # start snapshot tx
     $self->dbh->do("start transaction with consistent snapshot");
-    $self->write_outfile_exclude;
+    $self->store_outfile_exclude;
     $self->create_temporary_table_exclude;
     $self->load_data_exclude;
     unlink $self->outfile_exclude;
 
-    # write outfile table
-    $self->write_outfile_table;
+    # store outfile table
+    $self->store_outfile_table;
 
     # drop indexes
     $self->drop_indexes if ( $self->reindex );
 
-    # read outfile table
-    $self->read_outfile_table;
-    $self->write_outfile_include;
+    # load outfile table
+    $self->load_outfile_table;
+
+    print "replay_changes 0\n";
+    $self->replay_changes( temp_table => $TEMP_TABLE_IDS_TO_EXCLUDE );
+
+    # replay changes
+    $self->store_outfile_include;
     $self->create_temporary_table_include;
     $self->load_data_include;
     unlink $self->outfile_include;
-    $self->replay_changes;
+    print "replay_changes 1\n";
+    $self->replay_changes( temp_table => $TEMP_TABLE_IDS_TO_INCLUDE );
+    $self->append_to_excluded_ids;
     $self->drop_temporary_table_include;
 
     # recreate indexes
     $self->recreate_indexes if ( $self->reindex );
-    $self->write_outfile_include;
+
+    # replay changes
+    $self->store_outfile_include;
     $self->create_temporary_table_include;
     $self->load_data_include;
     unlink $self->outfile_include;
-    $self->replay_changes;
+    print "replay_changes 2\n";
+    $self->replay_changes( temp_table => $TEMP_TABLE_IDS_TO_INCLUDE );
+    $self->append_to_excluded_ids;
     $self->drop_temporary_table_include;
 
     # swap table
     $self->dbh->do("stop slave");
     $self->dbh->do("set session autocommit=0");
-    $self->lock_tables(1);
-    $self->write_outfile_include;
+    $self->lock_tables( both => 1 );
+    $self->store_outfile_include;
     $self->create_temporary_table_include;
     $self->load_data_include;
     unlink $self->outfile_include;
-    $self->replay_changes(1);
+    print "replay_changes 3\n";
+    $self->replay_changes(
+        temp_table => $TEMP_TABLE_IDS_TO_INCLUDE,
+        use_tx     => 1
+    );
+    $self->append_to_excluded_ids;
     $self->drop_temporary_table_include;
-    $self->checksum if (0); # TODO: don't support checksum option
-    $self->alter_rename_table( $self->table,     $self->rename_table );
-    $self->alter_rename_table( $self->new_table, $self->table );
+    $self->checksum if (0);    # TODO: don't support checksum option
+    $self->rename_tables( $self->table, $self->rename_table, $self->new_table );
     $self->dbh->commit;
     $self->dbh->do("unlock tables");
     $self->dbh->do("set session autocommit=1");
@@ -259,11 +275,11 @@ sub get_slave_status {
     1;
 }
 
-sub alter_rename_table {
+sub rename_tables {
     my $self = shift;
-    my ( $src, $dst ) = @_;
-    my $query = "alter table %s rename %s";
-    $self->dbh->do( sprintf $query, $src, $dst );
+    my ( $old, $tmp, $new ) = @_;
+    my $query = "rename table %s to %s, %s to %s";
+    $self->dbh->do( sprintf $query, $old, $tmp, $new, $old );
 }
 
 sub drop_table {
@@ -326,10 +342,10 @@ sub release_lock {
 
 sub lock_tables {
     my $self        = shift;
-    my $both        = shift;
+    my %args        = @_;
     my $query       = "lock table %s WRITE";
     my @bind_values = ( $self->table );
-    if ($both) {
+    if ( $args{both} ) {
         $query .= ", %s WRITE";
         push @bind_values, $self->new_table;
     }
@@ -607,7 +623,7 @@ SQL
     $self->dbh->do( sprintf $query, @bind_values );
 }
 
-sub write_outfile_exclude {
+sub store_outfile_exclude {
     my $self  = shift;
     my $query = <<"SQL";
     select %s, %s from %s order by %s into outfile '%s'
@@ -641,7 +657,7 @@ SQL
     $self->dbh->do( sprintf $query, @bind_values );
 }
 
-sub write_outfile_include {
+sub store_outfile_include {
     my $self          = shift;
     my $delta_idcol   = sprintf "%s.%s", $self->delta_table, $IDCOLNAME;
     my $delta_dmlcol  = sprintf "%s.%s", $self->delta_table, $DMLCOLNAME;
@@ -688,7 +704,7 @@ SQL
     $self->dbh->do( sprintf $query, @bind_values );
 }
 
-sub write_outfile_table {
+sub store_outfile_table {
     my $self = shift;
 
     my $row_count;
@@ -717,7 +733,9 @@ SQL
             $self->{pk_columns},  $OUTFILE_SIZE,
             $self->outfile_table, $outfile_suffix
         );
-        $row_count = $self->dbh->do( sprintf $query, @bind_values );
+        my $sql = sprintf $query, @bind_values;
+        print $sql."\n";
+        $row_count = $self->dbh->do( $sql );
 
         $self->{outfile_suffix_start} = 1;
         $self->{outfile_suffix_end}   = $outfile_suffix;
@@ -757,7 +775,7 @@ sub drop_indexes {
     }
 }
 
-sub read_outfile_table {
+sub load_outfile_table {
     my $self = shift;
     while ( $self->{outfile_suffix_end} >= $self->{outfile_suffix_start} ) {
         my $query   = "load data infile '%s' into table %s(%s, %s)";
@@ -789,21 +807,21 @@ sub recreate_indexes {
 }
 
 sub replay_changes {
-    my $self   = shift;
-    my $use_tx = shift;
+    my $self = shift;
+    my %args = @_;
 
     my @bind_values =
-      ( $IDCOLNAME, $DMLCOLNAME, $TEMP_TABLE_IDS_TO_INCLUDE, $IDCOLNAME );
+      ( $IDCOLNAME, $DMLCOLNAME, $args{temp_table}, $IDCOLNAME );
     my $query = sprintf "select %s, %s from %s order by %s", @bind_values;
     my $changes = $self->dbh->selectall_arrayref( $query, { Slice => {} } );
 
-    $self->dbh->do("start transaction") if ($use_tx);
+    $self->dbh->do("start transaction") if ( $args{use_tx} );
 
     my $i = 0;
     for my $change ( @{$changes} ) {
         $i++;
-        $self->dbh->commit if ( $use_tx && ( $i % $COMMIT_SIZE == 0 ) );
-        if ( $change->{$IDCOLNAME} == $DMLTYPE_INSERT ) {
+        $self->dbh->commit if ( $args{use_tx} && ( $i % $COMMIT_SIZE == 0 ) );
+        if ( $change->{$DMLCOLNAME} == $DMLTYPE_INSERT ) {
             my $insert =
               "insert into %s(%s) select %s from %s where %s.%s = %d";
             my @bind_params = (
@@ -816,7 +834,7 @@ sub replay_changes {
             $rv != 1
               and croak "[$insert] affected $rv rows instead of 1 row";
         }
-        elsif ( $change->{$IDCOLNAME} == $DMLTYPE_DELETE ) {
+        elsif ( $change->{$DMLCOLNAME} == $DMLTYPE_DELETE ) {
             my $delete      = "delete %s from %s, %s where %s.%s = %d and %s";
             my $whereclause = join(
                 " and ",
@@ -835,7 +853,7 @@ sub replay_changes {
             $rv != 1
               and croak "[$delete] affected $rv rows instead of 1 row";
         }
-        elsif ( $change->{$IDCOLNAME} == $DMLTYPE_UPDATE ) {
+        elsif ( $change->{$DMLCOLNAME} == $DMLTYPE_UPDATE ) {
             my $update = "update %s, %s set %s where %s.%s = %d and %s";
             my $assign = join(
                 ",",
@@ -861,7 +879,17 @@ sub replay_changes {
               and croak "[$update] affected $rv rows instead of 1 row";
         }
     }
-    $self->dbh->commit if ($use_tx);
+    $self->dbh->commit if ( $args{use_tx} );
+}
+
+sub append_to_excluded_ids {
+    my $self        = shift;
+    my $query       = "insert into %s(%s, %s) select %s, %s from %s";
+    my @bind_values = (
+        $TEMP_TABLE_IDS_TO_EXCLUDE, $IDCOLNAME, $DMLCOLNAME, $IDCOLNAME,
+        $DMLCOLNAME, $TEMP_TABLE_IDS_TO_INCLUDE
+    );
+    $self->dbh->do( sprintf $query, @bind_values );
 }
 
 sub checksum {
