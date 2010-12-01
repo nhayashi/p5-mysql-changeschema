@@ -11,6 +11,8 @@ my $user  = "root";
 my $pass  = "root";
 my $ddl   = "ALTER TABLE $table ADD fuga int";
 
+local $MySQL::ChangeSchema::VERBOSE = 1;
+
 my $osc = MySQL::ChangeSchema->new(
     db    => $db,
     table => $table,
@@ -21,7 +23,6 @@ $osc->connect();
 $osc->init();
 $osc->cleanup();
 eval { $osc->execute($ddl); };
-
 if ($@) {
     print $@."\n";
     $osc->cleanup;
