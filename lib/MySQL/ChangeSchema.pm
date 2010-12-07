@@ -179,20 +179,20 @@ sub execute {
     $self->dbh->do( _verbose( 1, 'execute', "stop slave" ) );
     $self->dbh->do( _verbose( 1, 'execute', "set session autocommit=0" ) );
 
-    #    if ( $self->version ne '5.0.84' ) {
-    #        $self->lock_tables;
-    #    }
+    #if ( $self->version ne '5.0.84' ) {
+    #    $self->lock_tables;
+    #}
     $self->create_insert_trigger;
     $self->create_delete_trigger;
     $self->create_update_trigger;
 
-    #    if ( $self->version eq '5.0.84' ) {
-    #        $self->lock_tables;
-    #    }
+    #if ( $self->version eq '5.0.84' ) {
+    #    $self->lock_tables;
+    #}
     _verbose(1, 'execute', "commit");
     $self->dbh->commit;
 
-    #    $self->dbh->do("unlock tables");
+    #$self->dbh->do("unlock tables");
     $self->dbh->do( _verbose( 1, 'execute', "set session autocommit=1" ) );
     $self->dbh->do( _verbose( 1, 'execute', "start slave" ) )
       if ( $self->get_slave_status && !$self->{is_slave_running} );
